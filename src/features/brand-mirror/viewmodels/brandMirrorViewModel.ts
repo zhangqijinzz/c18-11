@@ -26,13 +26,30 @@ export class BrandMirrorViewModel {
   }
 
   initialize(): void {
-    const stored = this.repository.load()
+    const { document: stored, warnings } = this.repository.load()
     if (stored) {
-      this.snapshot = this.makeSnapshot(stored, '已恢复最近一次工作状态')
+      this.snapshot = this.makeSnapshot(stored, this.buildRecoveryMessage(warnings), 'ready', warnings)
+      // 用清洗后的数据回写一次，避免下次恢复时继续保留坏数据
+      try {
+        this.repository.save({ ...stored })
+      } catch {
+        // 回写失败不影响本次恢复，快照中已经是可用数据
+      }
     } else {
-      this.snapshot = this.makeSnapshot({ tokens: INITIAL_TOKENS, theme: 'studio', versions: [] }, '从 Studio warm 开始探索')
+      this.snapshot = this.makeSnapshot(
+        { tokens: INITIAL_TOKENS, theme: 'studio', versions: [] },
+        warnings.length > 0 ? warnings[0] : '从 Studio warm 开始探索',
+        'ready',
+        warnings,
+      )
     }
     this.emit()
+  }
+
+  private buildRecoveryMessage(warnings: string[]): string {
+    if (warnings.length === 0) return '已恢复最近一次工作状态'
+    if (warnings.length === 1) return `已恢复可用内容，1 处异常已处理：${warnings[0]}`
+    return `已恢复可用内容，${warnings.length} 处异常已处理：${warnings.slice(0, 2).join('；')}等`
   }
 
   selectTheme(theme: BrandTheme): void {
@@ -112,10 +129,11 @@ export class BrandMirrorViewModel {
     this.emit()
   }
 
-  private makeSnapshot(document: Omit<BrandDocument, 'version'>, message = '', status: BrandMirrorSnapshot['status'] = 'ready'): BrandMirrorSnapshot {
+  private makeSnapshot(document: Omit<BrandDocument, 'version'>, message = '', status: BrandMirrorSnapshot['status'] = 'ready', recoveryWarnings: string[] = []): BrandMirrorSnapshot {
     const ratio = contrastRatio(document.tokens.primary, document.tokens.secondary)
+    const safeRatio = Number.isFinite(ratio) ? ratio : 1
     const latestVersion = document.versions[document.versions.length - 1]
-    return { status, tokens: cloneTokens(document.tokens), theme: document.theme, versions: document.versions, compareMode: false, activeVersionId: latestVersion?.id ?? null, contrastRatio: ratio, contrastWarning: ratio < 3, message }
+    return { status, tokens: cloneTokens(document.tokens), theme: document.theme, versions: document.versions, compareMode: false, activeVersionId: latestVersion?.id ?? null, contrastRatio: safeRatio, contrastWarning: safeRatio < 3, message, recoveryWarnings }
   }
 
   private emit(): void {
