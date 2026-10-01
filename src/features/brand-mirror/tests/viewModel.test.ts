@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest'
 import { BrandMirrorViewModel } from '../viewmodels/brandMirrorViewModel'
 import type { BrandDocument } from '../models/brandMirrorModels'
 import type { BrandRepository } from '../repositories/brandRepository'
+import { recoverDocument, type RecoveredDocument } from '../domain/documentRecovery'
 import { buildBrandGuidelinesMarkdown, type BrandGuidelinesExporter } from '../services/exportService'
 
 class MemoryRepository implements BrandRepository {
   document: BrandDocument | null = null
   shouldFail = false
-  load(): BrandDocument | null { return this.document }
+  load(): RecoveredDocument | null { return this.document ? recoverDocument(this.document) : null }
   save(document: BrandDocument): void { if (this.shouldFail) throw new Error('offline'); this.document = document }
 }
 
@@ -57,6 +58,26 @@ describe('BrandMirrorViewModel', () => {
     viewModel.initialize()
     expect(viewModel.getSnapshot().theme).toBe('night')
     expect(viewModel.getSnapshot().message).toContain('恢复')
+  })
+
+  it('surfaces recovery warnings without losing saved versions', () => {
+    const repository = new MemoryRepository()
+    repository.document = {
+      version: 1,
+      theme: 'night',
+      tokens: { primary: 'not-a-color', secondary: '#191829', radiusScale: [6, 10, 14, 22], spacingScale: [4, 8, 12, 18, 28], typeScale: [12, 14, 16, 20, 28, 38] },
+      versions: [
+        { id: 'v1', label: 'Version A', createdAt: '2024-01-01T00:00:00.000Z', tokens: { primary: '#A98BFF', secondary: '#191829', radiusScale: [6, 10, 14, 22], spacingScale: [4, 8, 12, 18, 28], typeScale: [12, 14, 16, 20, 28, 38] } },
+        { id: 'v2', label: 'Version B', createdAt: '2024-02-01T00:00:00.000Z', tokens: { primary: '#238B73', secondary: '#173C35', radiusScale: [4, 8, 12, 18], spacingScale: [4, 8, 16, 24, 40], typeScale: [12, 14, 16, 22, 30, 44] } },
+      ],
+    }
+    const viewModel = new BrandMirrorViewModel(repository)
+    viewModel.initialize()
+    const snapshot = viewModel.getSnapshot()
+    expect(snapshot.versions).toHaveLength(2)
+    expect(snapshot.tokens.primary).toBe('#F15A47')
+    expect(Number.isNaN(snapshot.contrastRatio)).toBe(false)
+    expect(snapshot.message).toContain('跳过')
   })
 
   it('exports the current token system as brand guidelines', () => {

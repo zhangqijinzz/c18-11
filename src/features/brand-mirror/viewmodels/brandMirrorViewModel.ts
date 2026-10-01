@@ -28,7 +28,7 @@ export class BrandMirrorViewModel {
   initialize(): void {
     const stored = this.repository.load()
     if (stored) {
-      this.snapshot = this.makeSnapshot(stored, '已恢复最近一次工作状态')
+      this.snapshot = this.makeSnapshot(stored.document, recoveryMessage(stored.warnings))
     } else {
       this.snapshot = this.makeSnapshot({ tokens: INITIAL_TOKENS, theme: 'studio', versions: [] }, '从 Studio warm 开始探索')
     }
@@ -113,7 +113,7 @@ export class BrandMirrorViewModel {
   }
 
   private makeSnapshot(document: Omit<BrandDocument, 'version'>, message = '', status: BrandMirrorSnapshot['status'] = 'ready'): BrandMirrorSnapshot {
-    const ratio = contrastRatio(document.tokens.primary, document.tokens.secondary)
+    const ratio = safeRatio(contrastRatio(document.tokens.primary, document.tokens.secondary))
     const latestVersion = document.versions[document.versions.length - 1]
     return { status, tokens: cloneTokens(document.tokens), theme: document.theme, versions: document.versions, compareMode: false, activeVersionId: latestVersion?.id ?? null, contrastRatio: ratio, contrastWarning: ratio < 3, message }
   }
@@ -121,4 +121,16 @@ export class BrandMirrorViewModel {
   private emit(): void {
     this.listeners.forEach((listener) => listener())
   }
+}
+
+/** 颜色异常时对比度可能算出 NaN/Infinity，统一兜成 1，避免界面显示“非数字” */
+function safeRatio(value: number): number {
+  return Number.isFinite(value) ? value : 1
+}
+
+function recoveryMessage(warnings: string[]): string {
+  if (warnings.length === 0) return '已恢复最近一次工作状态'
+  const summary = warnings.slice(0, 2).join('；')
+  const more = warnings.length > 2 ? ` 等 ${warnings.length} 处问题` : ''
+  return `已恢复可保留的内容：${summary}${more}，其余坏数据已跳过`
 }
